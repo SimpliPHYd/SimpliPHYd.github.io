@@ -25,7 +25,7 @@
     <!-- Header -->
     <div class="w-full max-w-7xl mx-auto text-center">
         <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-cyan-500">
-            Virtual Trainer Pro
+            Trainer 1.0
         </h1>
     </div>
 
@@ -246,7 +246,14 @@
             try {
                 const snap = await getDoc(docPath());
                 if (!snap.exists()) throw new Error("Session not found");
-                await setDoc(docPath(), { users: { [currentUserId]: { ...localMetrics, updatedAt: Date.now() } } }, { merge: true });
+                
+                // Explicitly add initial state using setDoc with nested map and merge: true
+                await setDoc(docPath(), { 
+                    users: { 
+                        [currentUserId]: { power: 0, speed: 0, cadence: 0, distance: 0, gradient: 0, updatedAt: Date.now() } 
+                    } 
+                }, { merge: true });
+                
                 enterSession();
             } catch (e) { 
                 const err = document.getElementById('joinError');
@@ -276,7 +283,27 @@
             unsubscribeSession = onSnapshot(docPath(), (snap) => {
                 if(snap.exists()) {
                     const data = snap.data();
-                    activeUsers = data.users || {};
+                    
+                    let newUsers = data.users || {};
+                    
+                    // Loop through network users to manage states and avatars safely
+                    Object.keys(newUsers).forEach(uid => {
+                        if (uid === currentUserId) {
+                            // Be careful NOT to overwrite the local user's current live metrics with stale network data
+                            newUsers[currentUserId].distance = localMetrics.distance;
+                            newUsers[currentUserId].speed = localMetrics.speed;
+                            newUsers[currentUserId].power = localMetrics.power;
+                            newUsers[currentUserId].cadence = localMetrics.cadence;
+                        } else {
+                            // If a new user is detected, create a new 3D avatar sphere for them immediately
+                            if (!avatars3D[uid]) {
+                                updateAvatar3D(uid, newUsers[uid].distance || 0, false);
+                            }
+                        }
+                    });
+                    
+                    activeUsers = newUsers;
+                    
                     renderGrid();
                     
                     // Sync track data if not host
@@ -340,11 +367,14 @@
         async function syncLocalData() {
             if(!currentSessionId || !currentUserId) return;
             const now = Date.now();
-            if (now - lastSyncTime < 1000) return; // Throttle to 1s
+            if (now - lastSyncTime < 2500) return; // Throttle to 2.5s to prevent quota exhaustion
             lastSyncTime = now;
 
+            // Uses proper nested object for setDoc with { merge: true } instead of dot notation
             const updatePayload = {
-                [`users.${currentUserId}`]: { ...localMetrics, updatedAt: now }
+                users: {
+                    [currentUserId]: { ...localMetrics, updatedAt: now }
+                }
             };
             
             if (isHost) updatePayload.trackData = trackData;
@@ -700,6 +730,8 @@
         }
 
         // --- Main Game / Physics Loop ---
+        let lastUIRenderTime = 0;
+
         function gameLoop(time) {
             if(!currentSessionId) return; // Stop if left session
 
@@ -724,7 +756,31 @@
                 activeUsers[currentUserId].speed = localMetrics.speed;
                 activeUsers[currentUserId].power = localMetrics.power;
                 activeUsers[currentUserId].cadence = localMetrics.cadence;
-                renderGrid(); // This calls updateAvatar3D internally
+            }
+
+            // Dead reckoning for remote users & Avatar updates
+            Object.keys(activeUsers).forEach(uid => {
+                let user = activeUsers[uid];
+                
+                // Dead reckoning: smoothly extrapolate movement for other players between network updates
+                if (uid !== currentUserId && user.speed > 0) {
+                    let speedMps = user.speed / 3.6;
+                    let distMeters = speedMps * (dt / 1000);
+                    user.distance = (user.distance || 0) + (distMeters / 1000);
+                    
+                    if(user.distance > trackData.lengthKm) {
+                        user.distance = 0;
+                    }
+                }
+                
+                // Update 3D avatar position smoothly every frame for everyone
+                updateAvatar3D(uid, user.distance || 0, uid === currentUserId);
+            });
+
+            // Update UI Grid (Throttled to 200ms to avoid DOM thrashing, feels instant)
+            if (time - lastUIRenderTime > 200) {
+                renderGrid(); 
+                lastUIRenderTime = time;
             }
 
             // Render 3D
