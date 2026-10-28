@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Virtual Trainer Pro - Multiplayer 3D Cycling</title>
+    <title>Online Multi Trainer</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
@@ -25,7 +25,7 @@
     <!-- Header -->
     <div class="w-full max-w-7xl mx-auto text-center">
         <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-cyan-500">
-            Trainer 1.0
+            Virtual Group Ride
         </h1>
     </div>
 
@@ -119,7 +119,10 @@
                 
                 <!-- 3D Environment -->
                 <div class="bg-slate-800 border border-slate-700 rounded-xl p-1 shadow-lg">
-                    <div id="scene3d"></div>
+                    <div id="scene3d">
+                        <!-- Minimap Overlay -->
+                        <canvas id="minimapCanvas" class="absolute bottom-4 right-4 w-[250px] h-20 bg-slate-900/80 border border-slate-600 rounded-lg shadow-lg pointer-events-none z-10" width="250" height="80"></canvas>
+                    </div>
                 </div>
 
                 <!-- Multiplayer Metrics Grid -->
@@ -197,6 +200,8 @@
         let activeUsers = {};
         let localMetrics = { power: 0, speed: 0, cadence: 0, distance: 0, gradient: 0 };
         let lastSyncTime = 0;
+        let syncErrorCount = 0; // Tracks consecutive sync errors
+        let isCleaningUp = false; // Prevents double-cleanup on exit
 
         // Default Track (10 points, X normalized 0-1, Y is elevation in meters 0-500)
         let trackData = {
@@ -246,29 +251,58 @@
             try {
                 const snap = await getDoc(docPath());
                 if (!snap.exists()) throw new Error("Session not found");
-                
-                // Explicitly add initial state using setDoc with nested map and merge: true
-                await setDoc(docPath(), { 
-                    users: { 
-                        [currentUserId]: { power: 0, speed: 0, cadence: 0, distance: 0, gradient: 0, updatedAt: Date.now() } 
-                    } 
-                }, { merge: true });
-                
+                await setDoc(docPath(), { users: { [currentUserId]: { ...localMetrics, updatedAt: Date.now() } } }, { merge: true });
                 enterSession();
             } catch (e) { 
                 const err = document.getElementById('joinError');
-                err.textContent = e.message;
+                err.textContent = "Error joining: Check Firebase Rules/Quota";
                 err.classList.remove('hidden');
+                console.error("Join error:", e);
             }
         };
 
-        document.getElementById('btnLeave').onclick = () => {
+        async function cleanupSession() {
+            if (!currentSessionId || !currentUserId || isCleaningUp) return;
+            isCleaningUp = true;
+            const path = docPath();
+            
+            try {
+                // 1. Remove this user from the session
+                await updateDoc(path, {
+                    [`users.${currentUserId}`]: deleteField()
+                });
+
+                // 2. Check if the session is now empty
+                const snap = await getDoc(path);
+                if (snap.exists()) {
+                    const data = snap.data();
+                    if (!data.users || Object.keys(data.users).length === 0) {
+                        // 3. Delete the empty session document
+                        await deleteDoc(path);
+                    }
+                }
+            } catch (e) {
+                console.error("Cleanup error", e);
+            }
+        }
+
+        document.getElementById('btnLeave').onclick = async () => {
             if(unsubscribeSession) unsubscribeSession();
+            await cleanupSession(); // Cleanup Firestore before clearing local state
             currentSessionId = null;
             document.getElementById('dashboardView').classList.add('hidden-view');
             document.getElementById('landingView').classList.remove('hidden-view');
             if(btDevice?.gatt.connected) btDevice.gatt.disconnect();
         };
+
+        // Handle tab close, refresh, or navigation
+        window.addEventListener('beforeunload', () => {
+            if (currentSessionId) cleanupSession();
+        });
+        
+        window.addEventListener('pagehide', () => {
+            if (currentSessionId) cleanupSession();
+        });
 
         function enterSession() {
             document.getElementById('landingView').classList.add('hidden-view');
@@ -367,7 +401,10 @@
         async function syncLocalData() {
             if(!currentSessionId || !currentUserId) return;
             const now = Date.now();
-            if (now - lastSyncTime < 2500) return; // Throttle to 2.5s to prevent quota exhaustion
+            
+            // Dynamic Throttle: 2.5s base, but increases by 5 seconds per consecutive error to prevent backend overload
+            const currentThrottle = 2500 + (syncErrorCount * 5000);
+            if (now - lastSyncTime < currentThrottle) return; 
             lastSyncTime = now;
 
             // Uses proper nested object for setDoc with { merge: true } instead of dot notation
@@ -381,7 +418,17 @@
 
             try {
                 await setDoc(docPath(), updatePayload, { merge: true });
-            } catch(e) { console.error("Sync error", e); }
+                syncErrorCount = 0; // Reset error count on successful sync
+            } catch(e) { 
+                console.warn("Firebase Sync Error (Backing off)...", e.message); 
+                syncErrorCount++;
+                
+                if(e.code === 'permission-denied') {
+                    console.error("PERMISSION DENIED: Did you leave your Firestore Security Rules set to 'if false'?");
+                } else if(e.code === 'resource-exhausted') {
+                    console.error("QUOTA EXCEEDED: Your daily Firestore quota has run out.");
+                }
+            }
         }
 
         // --- 2D Track Editor ---
@@ -597,6 +644,62 @@
             }
         }
 
+        // --- Minimap Overlay ---
+        const minimapCanvas = document.getElementById('minimapCanvas');
+        const minimapCtx = minimapCanvas.getContext('2d');
+
+        function drawMinimap() {
+            if(!minimapCtx) return;
+            const width = minimapCanvas.width;
+            const height = minimapCanvas.height;
+            minimapCtx.clearRect(0, 0, width, height);
+
+            // Draw track profile
+            minimapCtx.beginPath();
+            minimapCtx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+            minimapCtx.lineWidth = 3;
+            trackData.points.forEach((p, i) => {
+                let px = p.x * width;
+                let py = height - (p.y / MAX_ELEV) * height;
+                if(i===0) minimapCtx.moveTo(px, py); else minimapCtx.lineTo(px, py);
+            });
+            minimapCtx.stroke();
+
+            // Draw avatars on minimap
+            Object.entries(activeUsers).forEach(([uid, data]) => {
+                const isMe = uid === currentUserId;
+                let distFraction = Math.max(0, Math.min(1, (data.distance || 0) / trackData.lengthKm));
+                
+                // Interpolate Elevation for exact dot placement
+                let p1 = trackData.points[0], p2 = trackData.points[0];
+                for(let i=0; i<trackData.points.length - 1; i++) {
+                    if (distFraction >= trackData.points[i].x && distFraction <= trackData.points[i+1].x) {
+                        p1 = trackData.points[i];
+                        p2 = trackData.points[i+1];
+                        break;
+                    }
+                }
+                
+                let rangeX = p2.x - p1.x;
+                let localFrac = rangeX === 0 ? 0 : (distFraction - p1.x) / rangeX;
+                let interpY = p1.y + (p2.y - p1.y) * localFrac;
+
+                let px = distFraction * width;
+                let py = height - (interpY / MAX_ELEV) * height;
+
+                minimapCtx.beginPath();
+                minimapCtx.arc(px, py, isMe ? 5 : 4, 0, Math.PI*2);
+                minimapCtx.fillStyle = isMe ? '#22c55e' : strToColor(uid);
+                minimapCtx.fill();
+                
+                if(isMe) {
+                    minimapCtx.strokeStyle = '#ffffff';
+                    minimapCtx.lineWidth = 1.5;
+                    minimapCtx.stroke();
+                }
+            });
+        }
+
 
         // --- Web Bluetooth FTMS Control ---
         let btDevice = null;
@@ -782,6 +885,8 @@
                 renderGrid(); 
                 lastUIRenderTime = time;
             }
+
+            drawMinimap(); // Render 2D Minimap
 
             // Render 3D
             if(renderer && scene && camera) {
