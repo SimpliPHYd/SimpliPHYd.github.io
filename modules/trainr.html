@@ -276,7 +276,17 @@
             unsubscribeSession = onSnapshot(docPath(), (snap) => {
                 if(snap.exists()) {
                     const data = snap.data();
-                    activeUsers = data.users || {};
+                    
+                    // Preserve local player's precise state to prevent jitter from delayed remote sync
+                    let newUsers = data.users || {};
+                    if (newUsers[currentUserId]) {
+                        newUsers[currentUserId].distance = localMetrics.distance;
+                        newUsers[currentUserId].speed = localMetrics.speed;
+                        newUsers[currentUserId].power = localMetrics.power;
+                        newUsers[currentUserId].cadence = localMetrics.cadence;
+                    }
+                    activeUsers = newUsers;
+                    
                     renderGrid();
                     
                     // Sync track data if not host
@@ -340,7 +350,7 @@
         async function syncLocalData() {
             if(!currentSessionId || !currentUserId) return;
             const now = Date.now();
-            if (now - lastSyncTime < 1000) return; // Throttle to 1s
+            if (now - lastSyncTime < 2500) return; // Throttle to 2.5s to prevent quota exhaustion
             lastSyncTime = now;
 
             const updatePayload = {
@@ -700,6 +710,8 @@
         }
 
         // --- Main Game / Physics Loop ---
+        let lastUIRenderTime = 0;
+
         function gameLoop(time) {
             if(!currentSessionId) return; // Stop if left session
 
@@ -724,7 +736,31 @@
                 activeUsers[currentUserId].speed = localMetrics.speed;
                 activeUsers[currentUserId].power = localMetrics.power;
                 activeUsers[currentUserId].cadence = localMetrics.cadence;
-                renderGrid(); // This calls updateAvatar3D internally
+            }
+
+            // Dead reckoning for remote users & Avatar updates
+            Object.keys(activeUsers).forEach(uid => {
+                let user = activeUsers[uid];
+                
+                // Dead reckoning: smoothly extrapolate movement for other players between network updates
+                if (uid !== currentUserId && user.speed > 0) {
+                    let speedMps = user.speed / 3.6;
+                    let distMeters = speedMps * (dt / 1000);
+                    user.distance = (user.distance || 0) + (distMeters / 1000);
+                    
+                    if(user.distance > trackData.lengthKm) {
+                        user.distance = 0;
+                    }
+                }
+                
+                // Update 3D avatar position smoothly every frame for everyone
+                updateAvatar3D(uid, user.distance || 0, uid === currentUserId);
+            });
+
+            // Update UI Grid (Throttled to 200ms to avoid DOM thrashing, feels instant)
+            if (time - lastUIRenderTime > 200) {
+                renderGrid(); 
+                lastUIRenderTime = time;
             }
 
             // Render 3D
