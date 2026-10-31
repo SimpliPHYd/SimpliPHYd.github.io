@@ -173,7 +173,7 @@
 
     <!-- Firebase Logic -->
     <script type="module">
-          import { initializeApp } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-app.js";
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-app.js";
 
         import { getAnalytics } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-analytics.js";
         import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-auth.js";
@@ -1179,6 +1179,18 @@
         const minimapCanvas = document.getElementById('minimapCanvas');
         const minimapCtx = minimapCanvas.getContext('2d');
         
+        let minimapHoverX = -1;
+
+        minimapCanvas.addEventListener('mousemove', (e) => {
+            const rect = minimapCanvas.getBoundingClientRect();
+            // Scale mouse position to canvas internal resolution
+            minimapHoverX = (e.clientX - rect.left) * (minimapCanvas.width / rect.width);
+        });
+
+        minimapCanvas.addEventListener('mouseleave', () => {
+            minimapHoverX = -1;
+        });
+
         const topdownCanvas = document.getElementById('topdownCanvas');
         const topdownCtx = topdownCanvas.getContext('2d');
 
@@ -1306,6 +1318,57 @@
                     minimapCtx.stroke();
                 }
             });
+
+            // Draw hover elevation tooltip
+            if (minimapHoverX >= 0) {
+                let fraction = minimapHoverX / width;
+                fraction = Math.max(0, Math.min(1, fraction));
+                
+                let p1 = trackData.points[0], p2 = trackData.points[0];
+                for(let i=0; i<trackData.points.length - 1; i++) {
+                    if (fraction >= trackData.points[i].x && fraction <= trackData.points[i+1].x) {
+                        p1 = trackData.points[i];
+                        p2 = trackData.points[i+1];
+                        break;
+                    }
+                }
+                
+                let rangeX = p2.x - p1.x;
+                let localFrac = rangeX === 0 ? 0 : (fraction - p1.x) / rangeX;
+                
+                let interpEle = 0;
+                if (trackData.isGpxLoaded && p1.ele !== undefined && p2.ele !== undefined) {
+                    interpEle = p1.ele + (p2.ele - p1.ele) * localFrac;
+                } else {
+                    interpEle = p1.y + (p2.y - p1.y) * localFrac;
+                }
+
+                if (trackData.mode === 'erg') interpEle = 0; // ERG is flat
+
+                // Vertical line
+                minimapCtx.beginPath();
+                minimapCtx.moveTo(minimapHoverX, 0);
+                minimapCtx.lineTo(minimapHoverX, height);
+                minimapCtx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+                minimapCtx.lineWidth = 1;
+                minimapCtx.stroke();
+
+                // Tooltip background and text
+                const text = `${Math.round(interpEle)}m`;
+                minimapCtx.font = 'bold 10px Inter, sans-serif';
+                const textWidth = minimapCtx.measureText(text).width;
+                
+                let textX = minimapHoverX + 6;
+                // Keep tooltip on screen
+                if (textX + textWidth > width - 4) {
+                    textX = minimapHoverX - textWidth - 6;
+                }
+                
+                minimapCtx.fillStyle = 'rgba(15, 23, 42, 0.8)';
+                minimapCtx.fillRect(textX - 4, 4, textWidth + 8, 16);
+                minimapCtx.fillStyle = '#ffffff';
+                minimapCtx.fillText(text, textX, 15);
+            }
         }
 
 
@@ -1407,27 +1470,40 @@
         async function updateTrainerResistance() {
             if(!ftmsControlChar || pendingCommand) return;
             
-            // Calc Gradient from track curve based on current distance
-            let t = Math.max(0, Math.min(1, localMetrics.distance / trackData.lengthKm));
+            // Calc Gradient strictly from track data elevation (not the scaled 3D visual curve)
+            let distFraction = Math.max(0, Math.min(1, localMetrics.distance / trackData.lengthKm));
             
-            // To get gradient, sample a tiny bit ahead
-            let tNext = Math.min(1, t + 0.001);
-            if(scene && scene.userData.curve) {
-                let p1 = scene.userData.curve.getPointAt(t);
-                let p2 = scene.userData.curve.getPointAt(tNext);
-                let dY = p2.y - p1.y; // meters
-                let dZ = Math.abs(p2.z - p1.z); // meters
-                localMetrics.gradient = dZ > 0 ? (dY / dZ) * 100 : 0;
+            let p1 = trackData.points[0];
+            let p2 = trackData.points[trackData.points.length - 1];
+            
+            for (let i = 0; i < trackData.points.length - 1; i++) {
+                if (distFraction >= trackData.points[i].x && distFraction <= trackData.points[i+1].x) {
+                    p1 = trackData.points[i];
+                    p2 = trackData.points[i+1];
+                    break;
+                }
             }
+            
+            let dX = (p2.x - p1.x) * trackData.lengthKm * 1000; // run in meters
+            let dY = 0; // rise in meters
+            
+            if (trackData.isGpxLoaded && p1.ele !== undefined && p2.ele !== undefined) {
+                dY = p2.ele - p1.ele;
+            } else {
+                dY = p2.y - p1.y;
+            }
+            
+            localMetrics.gradient = dX > 0 ? (dY / dX) * 100 : 0;
 
             pendingCommand = true;
             try {
                 if(trackData.mode === 'resistance') {
-                    // Map gradient to 0-100 resistance level
-                    // Say 15% gradient = 100 resistance at 100% difficulty
+                    // Map gradient -30% to +30% into 0-100 resistance level
                     let difficulty = parseInt(uiDiff.value) / 100;
-                    let targetRes = Math.max(0, (localMetrics.gradient / 15) * 100 * difficulty);
-                    targetRes = Math.min(100, Math.round(targetRes));
+                    
+                    let mappedRes = ((localMetrics.gradient + 30) / 60) * 100;
+                    let targetRes = Math.max(0, Math.min(100, mappedRes * difficulty));
+                    targetRes = Math.round(targetRes);
                     
                     // OpCode 0x04 Set Target Resistance Level
                     await ftmsControlChar.writeValue(new Uint8Array([0x04, targetRes]));
