@@ -156,9 +156,21 @@
                 <!-- 3D Environment -->
                 <div class="bg-slate-800 border border-slate-700 rounded-xl p-1 shadow-lg">
                     <div id="scene3d">
-                        <!-- Minimap Overlays -->
-                        <canvas id="topdownCanvas" class="absolute top-4 right-4 w-[160px] h-[160px] bg-slate-900/80 border border-slate-600 rounded-lg shadow-lg pointer-events-none z-10 hidden-view" width="160" height="160"></canvas>
-                        <canvas id="minimapCanvas" class="absolute bottom-4 right-4 w-[250px] h-20 bg-slate-900/80 border border-slate-600 rounded-lg shadow-lg pointer-events-none z-10" width="250" height="80"></canvas>
+                        <!-- Stats Overlay -->
+                        <div class="absolute top-4 left-4 bg-slate-900/80 border border-slate-600 rounded-lg p-3 shadow-lg z-10 flex flex-col gap-1 pointer-events-none">
+                            <div class="flex justify-between items-center gap-4">
+                                <span class="text-xs text-slate-400 uppercase font-semibold">Grade</span>
+                                <span id="displayGrade" class="text-sm font-bold font-mono text-blue-400">0.0%</span>
+                            </div>
+                            <div class="flex justify-between items-center gap-4">
+                                <span id="labelResistance" class="text-xs text-slate-400 uppercase font-semibold">Resistance</span>
+                                <span id="displayResistance" class="text-sm font-bold font-mono text-orange-400">0%</span>
+                            </div>
+                        </div>
+                        <!-- Minimap Overlay -->
+                        <canvas id="minimapCanvas" class="absolute bottom-4 right-4 w-[250px] h-20 bg-slate-900/80 border border-slate-600 rounded-lg shadow-lg z-10 cursor-crosshair" width="250" height="80"></canvas>
+                        <!-- Top Down GPX Minimap -->
+                        <canvas id="topDownCanvas" class="absolute top-4 right-4 w-[150px] h-[150px] bg-slate-900/80 border border-slate-600 rounded-lg shadow-lg z-10 hidden" width="150" height="150"></canvas>
                     </div>
                 </div>
 
@@ -1178,93 +1190,17 @@
         // --- Minimap Overlay ---
         const minimapCanvas = document.getElementById('minimapCanvas');
         const minimapCtx = minimapCanvas.getContext('2d');
-        
+
         let minimapHoverX = -1;
 
         minimapCanvas.addEventListener('mousemove', (e) => {
             const rect = minimapCanvas.getBoundingClientRect();
-            // Scale mouse position to canvas internal resolution
             minimapHoverX = (e.clientX - rect.left) * (minimapCanvas.width / rect.width);
         });
 
         minimapCanvas.addEventListener('mouseleave', () => {
             minimapHoverX = -1;
         });
-
-        const topdownCanvas = document.getElementById('topdownCanvas');
-        const topdownCtx = topdownCanvas.getContext('2d');
-
-        function drawTopDownMinimap() {
-            if (!topdownCtx) return;
-            
-            if (!trackData.isGpxLoaded || !trackData.gpxBounds) {
-                topdownCanvas.classList.add('hidden-view');
-                return;
-            }
-            
-            topdownCanvas.classList.remove('hidden-view');
-            const width = topdownCanvas.width;
-            const height = topdownCanvas.height;
-            topdownCtx.clearRect(0, 0, width, height);
-
-            let b = trackData.gpxBounds;
-            let MathMax = Math.max;
-            let rangeX = b.maxX - b.minX;
-            let rangeZ = b.maxZ - b.minZ;
-            let maxRange = MathMax(rangeX, rangeZ) || 1;
-            
-            // 80% scale to leave padding
-            let scale = (width * 0.8) / maxRange; 
-            let offsetX = (width - rangeX * scale) / 2;
-            let offsetZ = (height - rangeZ * scale) / 2;
-
-            // Draw Track
-            topdownCtx.beginPath();
-            topdownCtx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
-            topdownCtx.lineWidth = 3;
-            
-            trackData.points.forEach((p, i) => {
-                let cx = (p.mapX - b.minX) * scale + offsetX;
-                let cz = height - ((p.mapZ - b.minZ) * scale + offsetZ); // Invert Z so North is Up
-                if (i === 0) topdownCtx.moveTo(cx, cz); else topdownCtx.lineTo(cx, cz);
-            });
-            topdownCtx.stroke();
-
-            // Draw Avatars
-            Object.entries(activeUsers).forEach(([uid, data]) => {
-                const isMe = uid === currentUserId;
-                let distFraction = MathMax(0, Math.min(1, (data.distance || 0) / trackData.lengthKm));
-                
-                let p1 = trackData.points[0], p2 = trackData.points[0];
-                for(let i=0; i<trackData.points.length - 1; i++) {
-                    if (distFraction >= trackData.points[i].x && distFraction <= trackData.points[i+1].x) {
-                        p1 = trackData.points[i];
-                        p2 = trackData.points[i+1];
-                        break;
-                    }
-                }
-                
-                let rangeDist = p2.x - p1.x;
-                let localFrac = rangeDist === 0 ? 0 : (distFraction - p1.x) / rangeDist;
-                
-                let interpX = p1.mapX + (p2.mapX - p1.mapX) * localFrac;
-                let interpZ = p1.mapZ + (p2.mapZ - p1.mapZ) * localFrac;
-                
-                let cx = (interpX - b.minX) * scale + offsetX;
-                let cz = height - ((interpZ - b.minZ) * scale + offsetZ);
-
-                topdownCtx.beginPath();
-                topdownCtx.arc(cx, cz, isMe ? 5 : 4, 0, Math.PI*2);
-                topdownCtx.fillStyle = isMe ? '#22c55e' : strToColor(uid);
-                topdownCtx.fill();
-                
-                if (isMe) {
-                    topdownCtx.strokeStyle = '#ffffff';
-                    topdownCtx.lineWidth = 1.5;
-                    topdownCtx.stroke();
-                }
-            });
-        }
 
         function drawMinimap() {
             if(!minimapCtx) return;
@@ -1371,6 +1307,90 @@
             }
         }
 
+        // --- Top Down GPX Minimap ---
+        const topDownCanvas = document.getElementById('topDownCanvas');
+        const topDownCtx = topDownCanvas.getContext('2d');
+
+        function drawTopDownMinimap() {
+            if (!topDownCtx || !trackData.isGpxLoaded || !trackData.gpxBounds) {
+                if (topDownCanvas) topDownCanvas.classList.add('hidden');
+                return;
+            }
+            
+            topDownCanvas.classList.remove('hidden');
+
+            const width = topDownCanvas.width;
+            const height = topDownCanvas.height;
+            topDownCtx.clearRect(0, 0, width, height);
+
+            const bounds = trackData.gpxBounds;
+            const rangeX = bounds.maxX - bounds.minX || 1;
+            const rangeZ = bounds.maxZ - bounds.minZ || 1;
+            
+            // Scale to fit canvas while maintaining aspect ratio, with 10px padding
+            const scale = Math.min((width - 20) / rangeX, (height - 20) / rangeZ);
+            const offsetX = (width - (rangeX * scale)) / 2;
+            const offsetY = (height - (rangeZ * scale)) / 2;
+
+            function mapToCanvas(x, z) {
+                return {
+                    cx: offsetX + (x - bounds.minX) * scale,
+                    cy: offsetY + (bounds.maxZ - z) * scale // Invert Z so North points UP
+                };
+            }
+
+            // Draw track path
+            topDownCtx.beginPath();
+            topDownCtx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+            topDownCtx.lineWidth = 2.5;
+            trackData.points.forEach((p, i) => {
+                if (p.mapX === undefined || p.mapZ === undefined) return;
+                let { cx, cy } = mapToCanvas(p.mapX, p.mapZ);
+                if (i === 0) topDownCtx.moveTo(cx, cy);
+                else topDownCtx.lineTo(cx, cy);
+            });
+            topDownCtx.stroke();
+
+            // Draw user avatars
+            Object.entries(activeUsers).forEach(([uid, data]) => {
+                const isMe = uid === currentUserId;
+                let distFraction = Math.max(0, Math.min(1, (data.distance || 0) / trackData.lengthKm));
+                
+                // Find interpolated mapX, mapZ based on current distance
+                let p1 = trackData.points[0], p2 = trackData.points[0];
+                for(let i=0; i<trackData.points.length - 1; i++) {
+                    if (distFraction >= trackData.points[i].x && distFraction <= trackData.points[i+1].x) {
+                        p1 = trackData.points[i];
+                        p2 = trackData.points[i+1];
+                        break;
+                    }
+                }
+                
+                let rangeX_dist = p2.x - p1.x;
+                let localFrac = rangeX_dist === 0 ? 0 : (distFraction - p1.x) / rangeX_dist;
+                
+                if (p1.mapX === undefined || p2.mapX === undefined) return;
+
+                let interpMapX = p1.mapX + (p2.mapX - p1.mapX) * localFrac;
+                let interpMapZ = p1.mapZ + (p2.mapZ - p1.mapZ) * localFrac;
+
+                let { cx, cy } = mapToCanvas(interpMapX, interpMapZ);
+
+                topDownCtx.beginPath();
+                topDownCtx.arc(cx, cy, isMe ? 5 : 4, 0, Math.PI*2);
+                let color = isMe ? '#22c55e' : strToColor(uid);
+                if (uid === 'GHOST') color = '#a855f7'; // Purple ghost
+                
+                topDownCtx.fillStyle = color;
+                topDownCtx.fill();
+                
+                if(isMe) {
+                    topDownCtx.strokeStyle = '#ffffff';
+                    topDownCtx.lineWidth = 1.5;
+                    topDownCtx.stroke();
+                }
+            });
+        }
 
         // --- Web Bluetooth FTMS Control ---
         let btDevice = null;
@@ -1468,8 +1488,6 @@
         }
 
         async function updateTrainerResistance() {
-            if(!ftmsControlChar || pendingCommand) return;
-            
             // Calc Gradient strictly from track data elevation (not the scaled 3D visual curve)
             let distFraction = Math.max(0, Math.min(1, localMetrics.distance / trackData.lengthKm));
             
@@ -1495,36 +1513,55 @@
             
             localMetrics.gradient = dX > 0 ? (dY / dX) * 100 : 0;
 
+            // Pre-calculate targets for UI
+            let currentTargetText = "0%";
+            let targetRes = 0;
+            let targetPower = 0;
+
+            if(trackData.mode === 'resistance') {
+                // Map gradient -30% to +30% into 0-100 resistance level
+                let difficulty = parseInt(uiDiff.value) / 100;
+                
+                let mappedRes = ((localMetrics.gradient + 30) / 60) * 100;
+                targetRes = Math.max(0, Math.min(100, Math.round(mappedRes * difficulty)));
+                currentTargetText = `${targetRes}%`;
+            } else {
+                // ERG Mode based on Bar Graph
+                let maxP = parseInt(uiMaxPower.value);
+                
+                let elapsed = localMetrics.time;
+                
+                let currentPowerPct = 0;
+                let accum = 0;
+                for (let seg of trackData.ergSegments) {
+                    accum += seg.durationMin * 60;
+                    if (elapsed <= accum) {
+                        currentPowerPct = seg.powerPct;
+                        break;
+                    }
+                }
+                
+                targetPower = Math.round(maxP * (currentPowerPct / 100));
+                currentTargetText = `${targetPower} W`;
+            }
+
+            // Update UI Overlay
+            const displayGrade = document.getElementById('displayGrade');
+            const displayRes = document.getElementById('displayResistance');
+            const labelRes = document.getElementById('labelResistance');
+            if (displayGrade) displayGrade.textContent = `${localMetrics.gradient > 0 ? '+' : ''}${localMetrics.gradient.toFixed(1)}%`;
+            if (displayRes) displayRes.textContent = currentTargetText;
+            if (labelRes) labelRes.textContent = trackData.mode === 'resistance' ? 'Resistance' : 'Target Pwr';
+
+            // Stop here if no trainer is connected or another BT command is writing
+            if(!ftmsControlChar || pendingCommand) return;
+
             pendingCommand = true;
             try {
                 if(trackData.mode === 'resistance') {
-                    // Map gradient -30% to +30% into 0-100 resistance level
-                    let difficulty = parseInt(uiDiff.value) / 100;
-                    
-                    let mappedRes = ((localMetrics.gradient + 30) / 60) * 100;
-                    let targetRes = Math.max(0, Math.min(100, mappedRes * difficulty));
-                    targetRes = Math.round(targetRes);
-                    
                     // OpCode 0x04 Set Target Resistance Level
                     await ftmsControlChar.writeValue(new Uint8Array([0x04, targetRes]));
                 } else {
-                    // ERG Mode based on Bar Graph
-                    let maxP = parseInt(uiMaxPower.value);
-                    
-                    let elapsed = localMetrics.time;
-                    
-                    let currentPowerPct = 0;
-                    let accum = 0;
-                    for (let seg of trackData.ergSegments) {
-                        accum += seg.durationMin * 60;
-                        if (elapsed <= accum) {
-                            currentPowerPct = seg.powerPct;
-                            break;
-                        }
-                    }
-                    
-                    let targetPower = Math.round(maxP * (currentPowerPct / 100));
-                    
                     // OpCode 0x05 Set Target Power (SINT16)
                     const buffer = new ArrayBuffer(3);
                     const view = new DataView(buffer);
