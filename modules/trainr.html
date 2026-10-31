@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Online Multi Trainer</title>
+    <title>Virtual Trainer Pro - Multiplayer 3D Cycling</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
@@ -14,6 +14,7 @@
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: #1e293b; }
         ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+        .custom-scrollbar::-webkit-scrollbar { height: 4px; }
         .hidden-view { display: none !important; }
         
         #editorCanvas { cursor: crosshair; touch-action: none; }
@@ -23,10 +24,20 @@
 <body class="min-h-screen flex flex-col p-4 md:p-6 gap-6">
 
     <!-- Header -->
-    <div class="w-full max-w-7xl mx-auto text-center">
+    <div class="w-full max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
         <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-cyan-500">
-            Virtual Group Ride
+            Virtual Trainer Pro
         </h1>
+        
+        <!-- Global Device Pairing -->
+        <div class="flex items-center gap-3">
+            <div class="flex items-center gap-2 text-sm bg-slate-900/50 px-3 py-1.5 rounded-lg border border-slate-700">
+                <div id="statusDot" class="w-2 h-2 rounded-full bg-slate-500"></div>
+                <span id="statusText" class="font-mono text-xs text-slate-300">Disconnected</span>
+            </div>
+            <button id="btnConnectTrainer" class="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-lg shadow transition-all">Connect Trainer</button>
+            <button id="btnDisconnectTrainer" class="px-4 py-1.5 bg-red-600 hover:bg-red-500 text-white text-sm font-semibold rounded-lg shadow transition-all hidden">Disconnect</button>
+        </div>
     </div>
 
     <!-- Loading State -->
@@ -57,16 +68,13 @@
         <!-- Controls & Bluetooth -->
         <div class="bg-slate-800 border border-slate-700 rounded-xl p-4 flex flex-wrap justify-between items-center gap-4 shadow-lg">
             <div class="flex items-center gap-3">
-                <span class="text-slate-400 text-sm">Session:</span>
+                <button id="btnStartRide" class="px-4 py-1.5 bg-green-600 hover:bg-green-500 text-white text-sm font-semibold rounded-lg shadow transition-all">Start Ride</button>
+                <button id="btnPauseRide" class="hidden px-4 py-1.5 bg-orange-600 hover:bg-orange-500 text-white text-sm font-semibold rounded-lg shadow transition-all">Pause Ride</button>
+                <button id="btnStopRide" class="hidden px-4 py-1.5 bg-red-600 hover:bg-red-500 text-white text-sm font-semibold rounded-lg shadow transition-all">Stop & Export</button>
+                <span class="text-slate-400 text-sm ml-2 border-l border-slate-600 pl-4">Session:</span>
                 <span id="displaySessionId" class="text-white font-bold tracking-widest font-mono bg-slate-900 px-3 py-1 rounded">---</span>
+                <button id="btnResetRide" class="text-sm text-yellow-400 hover:text-yellow-300 ml-4 hidden px-3 py-1 bg-slate-700 rounded font-semibold transition-all">Reset Ride</button>
                 <button id="btnLeave" class="text-sm text-red-400 hover:text-red-300 ml-2">Leave</button>
-            </div>
-            <div class="flex items-center gap-4">
-                <div class="flex items-center gap-2 text-sm bg-slate-900 px-3 py-1.5 rounded border border-slate-700">
-                    <div id="statusDot" class="w-2.5 h-2.5 rounded-full bg-slate-500"></div>
-                    <span id="statusText">Disconnected</span>
-                </div>
-                <button id="btnConnectTrainer" class="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-lg shadow transition-all">Connect Trainer</button>
             </div>
         </div>
 
@@ -88,7 +96,20 @@
                         </div>
                         <div id="panelResistance">
                             <label class="block text-sm text-slate-400 mb-1">Difficulty: <span id="diffVal">50</span>%</label>
-                            <input type="range" id="ctrlDifficulty" min="0" max="100" value="50" class="w-full">
+                            <input type="range" id="ctrlDifficulty" min="0" max="100" value="50" class="w-full mb-4">
+                            
+                            <label class="block text-sm text-slate-400 mb-1">Load GPX Route</label>
+                            <input type="file" id="gpxFileInput" accept=".gpx" class="block w-full text-xs text-slate-400
+                              file:mr-4 file:py-1 file:px-3
+                              file:rounded-full file:border-0
+                              file:text-xs file:font-semibold
+                              file:bg-slate-700 file:text-slate-200
+                              hover:file:bg-slate-600 bg-slate-900 border border-slate-600 rounded-lg cursor-pointer">
+                              
+                            <div id="ghostRiderContainer" class="hidden mt-3 p-3 bg-slate-900/50 rounded-lg border border-purple-500/30 flex items-center justify-between">
+                                <label for="toggleGhost" class="text-sm font-semibold text-purple-400 cursor-pointer">Race GPX Ghost</label>
+                                <input type="checkbox" id="toggleGhost" class="w-4 h-4 accent-purple-500 cursor-pointer">
+                            </div>
                         </div>
                         <div id="panelErg" class="hidden">
                             <label class="block text-sm text-slate-400 mb-1">Max Power (W)</label>
@@ -102,14 +123,29 @@
                     <div class="flex justify-between items-center mb-3">
                         <h3 class="font-bold text-lg">Track Editor</h3>
                         <div class="flex items-center gap-2">
-                            <label class="text-xs text-slate-400">Length (km):</label>
+                            <label id="editorLabel" class="text-xs text-slate-400">Length (km):</label>
                             <input type="number" id="trackLengthInput" value="10" min="1" max="100" class="w-16 bg-slate-900 border border-slate-600 rounded p-1 text-xs text-center">
                         </div>
                     </div>
                     <div class="relative w-full aspect-[4/3] bg-slate-900 rounded-lg border border-slate-700 overflow-hidden">
                         <canvas id="editorCanvas" class="absolute inset-0 w-full h-full"></canvas>
                     </div>
-                    <p class="text-[10px] text-slate-500 mt-2 text-center">Drag nodes vertically to adjust elevation. Synced to all riders.</p>
+                    
+                    <!-- New ERG Duration Controls -->
+                    <div id="ergDurationControls" class="hidden mt-3 flex flex-col gap-2">
+                        <div class="flex justify-between items-center text-sm">
+                            <span class="text-slate-400">Interval Durations (min)</span>
+                            <div class="flex gap-1" id="ergButtonsGroup">
+                                <button id="btnRemoveErg" class="px-2 py-1 bg-red-900/50 hover:bg-red-800 text-red-400 rounded transition-colors">-</button>
+                                <button id="btnAddErg" class="px-2 py-1 bg-green-900/50 hover:bg-green-800 text-green-400 rounded transition-colors">+</button>
+                            </div>
+                        </div>
+                        <div id="ergDurationInputs" class="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
+                            <!-- Inputs injected here -->
+                        </div>
+                    </div>
+
+                    <p id="editorHelperText" class="text-[10px] text-slate-500 mt-2 text-center">Drag nodes vertically to adjust elevation. Synced to all riders.</p>
                 </div>
 
             </div>
@@ -120,7 +156,8 @@
                 <!-- 3D Environment -->
                 <div class="bg-slate-800 border border-slate-700 rounded-xl p-1 shadow-lg">
                     <div id="scene3d">
-                        <!-- Minimap Overlay -->
+                        <!-- Minimap Overlays -->
+                        <canvas id="topdownCanvas" class="absolute top-4 right-4 w-[160px] h-[160px] bg-slate-900/80 border border-slate-600 rounded-lg shadow-lg pointer-events-none z-10 hidden-view" width="160" height="160"></canvas>
                         <canvas id="minimapCanvas" class="absolute bottom-4 right-4 w-[250px] h-20 bg-slate-900/80 border border-slate-600 rounded-lg shadow-lg pointer-events-none z-10" width="250" height="80"></canvas>
                     </div>
                 </div>
@@ -198,15 +235,26 @@
         let isHost = false; // Only host updates track topology
 
         let activeUsers = {};
-        let localMetrics = { power: 0, speed: 0, cadence: 0, distance: 0, gradient: 0 };
+        let localMetrics = { power: 0, speed: 0, cadence: 0, distance: 0, gradient: 0, time: 0 };
         let lastSyncTime = 0;
         let syncErrorCount = 0; // Tracks consecutive sync errors
         let isCleaningUp = false; // Prevents double-cleanup on exit
+        let lastResetTrigger = 0;
+        let isRideActive = false; // Tracks if the ride timer is running
+        
+        let recordedData = [];
+        let lastRecordTime = 0;
+        let gpxTimestamps = []; // Stores the timing profile for the ghost
+        let isGhostEnabled = false;
 
         // Default Track (10 points, X normalized 0-1, Y is elevation in meters 0-500)
         let trackData = {
+            mode: 'resistance',
             lengthKm: 10,
-            points: Array.from({length: 11}, (_, i) => ({ x: i / 10, y: 50 }))
+            resetTrigger: 0,
+            isGpxLoaded: false,
+            points: Array.from({length: 11}, (_, i) => ({ x: i / 10, y: 50 })),
+            ergSegments: [{ powerPct: 50, durationMin: 5 }]
         };
 
         // --- Auth Init ---
@@ -234,6 +282,7 @@
         document.getElementById('btnCreateSession').onclick = async () => {
             currentSessionId = Math.random().toString(36).substring(2, 8).toUpperCase();
             isHost = true;
+            document.getElementById('btnResetRide').classList.remove('hidden');
             try {
                 await setDoc(docPath(), {
                     trackData: trackData,
@@ -248,6 +297,7 @@
             if(val.length !== 6) return;
             currentSessionId = val;
             isHost = false;
+            document.getElementById('btnResetRide').classList.add('hidden');
             try {
                 const snap = await getDoc(docPath());
                 if (!snap.exists()) throw new Error("Session not found");
@@ -292,8 +342,88 @@
             currentSessionId = null;
             document.getElementById('dashboardView').classList.add('hidden-view');
             document.getElementById('landingView').classList.remove('hidden-view');
-            if(btDevice?.gatt.connected) btDevice.gatt.disconnect();
         };
+
+        document.getElementById('btnResetRide').onclick = async () => {
+            if(!isHost) return;
+            trackData.resetTrigger = Date.now();
+            isRideActive = false;
+            recordedData = [];
+            document.getElementById('btnStartRide').classList.remove('hidden');
+            document.getElementById('btnPauseRide').classList.add('hidden');
+            document.getElementById('btnStopRide').classList.add('hidden');
+            await syncLocalData();
+        };
+
+        document.getElementById('btnStartRide').onclick = () => {
+            isRideActive = true;
+            document.getElementById('btnStartRide').classList.add('hidden');
+            document.getElementById('btnPauseRide').classList.remove('hidden');
+            document.getElementById('btnStopRide').classList.remove('hidden');
+        };
+
+        document.getElementById('btnPauseRide').onclick = () => {
+            isRideActive = false;
+            document.getElementById('btnStartRide').classList.remove('hidden');
+            document.getElementById('btnPauseRide').classList.add('hidden');
+        };
+
+        document.getElementById('btnStopRide').onclick = () => {
+            isRideActive = false;
+            document.getElementById('btnStartRide').classList.remove('hidden');
+            document.getElementById('btnPauseRide').classList.add('hidden');
+            document.getElementById('btnStopRide').classList.add('hidden');
+            exportWorkout();
+        };
+
+        function exportWorkout() {
+            if (recordedData.length === 0) return;
+
+            const startTime = recordedData[0].timestamp.toISOString();
+            let tcx = `<?xml version="1.0" encoding="UTF-8"?>
+<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2" xmlns:ns3="http://www.garmin.com/xmlschemas/ActivityExtension/v2">
+  <Activities>
+    <Activity Sport="Biking">
+      <Id>${startTime}</Id>
+      <Lap StartTime="${startTime}">
+        <TotalTimeSeconds>${localMetrics.time}</TotalTimeSeconds>
+        <DistanceMeters>${localMetrics.distance * 1000}</DistanceMeters>
+        <Intensity>Active</Intensity>
+        <TriggerMethod>Manual</TriggerMethod>
+        <Track>
+`;
+            
+            recordedData.forEach(pt => {
+                tcx += `          <Trackpoint>
+            <Time>${pt.timestamp.toISOString()}</Time>
+            <DistanceMeters>${(pt.distance * 1000).toFixed(2)}</DistanceMeters>
+            <Cadence>${Math.round(pt.cadence)}</Cadence>
+            <Extensions>
+              <ns3:TPX>
+                <ns3:Speed>${(pt.speed / 3.6).toFixed(2)}</ns3:Speed>
+                <ns3:Watts>${Math.round(pt.power)}</ns3:Watts>
+              </ns3:TPX>
+            </Extensions>
+          </Trackpoint>
+`;
+            });
+
+            tcx += `        </Track>
+      </Lap>
+    </Activity>
+  </Activities>
+</TrainingCenterDatabase>`;
+
+            const blob = new Blob([tcx], { type: 'application/vnd.garmin.tcx+xml' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `VirtualRide_${new Date().getTime()}.tcx`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
 
         // Handle tab close, refresh, or navigation
         window.addEventListener('beforeunload', () => {
@@ -310,6 +440,10 @@
             document.getElementById('displaySessionId').textContent = currentSessionId;
             document.getElementById('dashboardView').style.display = 'flex'; // override hidden-view class
             
+            // Refresh UI state to unlock the dropdown and controls if you are the host
+            updateUIForMode();
+            renderErgInputs();
+
             // Resize canvas/3D now that they are visible
             resizeEditor();
             resize3D();
@@ -328,6 +462,7 @@
                             newUsers[currentUserId].speed = localMetrics.speed;
                             newUsers[currentUserId].power = localMetrics.power;
                             newUsers[currentUserId].cadence = localMetrics.cadence;
+                            newUsers[currentUserId].time = localMetrics.time;
                         } else {
                             // If a new user is detected, create a new 3D avatar sphere for them immediately
                             if (!avatars3D[uid]) {
@@ -338,8 +473,18 @@
                     
                     activeUsers = newUsers;
                     
-                    renderGrid();
-                    
+                    // Handle Global Reset for EVERYONE
+                    if (data.trackData && data.trackData.resetTrigger !== lastResetTrigger) {
+                        lastResetTrigger = data.trackData.resetTrigger;
+                        localMetrics.distance = 0;
+                        localMetrics.time = 0;
+                        isRideActive = false;
+                        recordedData = [];
+                        document.getElementById('btnStartRide').classList.remove('hidden');
+                        document.getElementById('btnPauseRide').classList.add('hidden');
+                        document.getElementById('btnStopRide').classList.add('hidden');
+                    }
+
                     // Sync track data if not host
                     if (!isHost && data.trackData) {
                         const localHash = JSON.stringify(trackData);
@@ -347,6 +492,8 @@
                         if (localHash !== remoteHash) {
                             trackData = data.trackData;
                             document.getElementById('trackLengthInput').value = trackData.lengthKm;
+                            updateUIForMode();
+                            renderErgInputs();
                             drawEditor();
                             rebuild3DTrack();
                         }
@@ -359,6 +506,12 @@
         }
 
         // --- Multiplayer Sync ---
+        function formatTime(s) {
+            let m = Math.floor((s || 0) / 60);
+            let sec = Math.floor((s || 0) % 60);
+            return `${m}:${sec.toString().padStart(2, '0')}`;
+        }
+
         function renderGrid() {
             const grid = document.getElementById('usersGrid');
             grid.innerHTML = '';
@@ -369,9 +522,12 @@
                 div.className = `bg-slate-800 rounded-xl p-4 border ${isMe ? 'border-blue-500' : 'border-slate-700'} relative flex flex-col gap-2`;
                 
                 div.innerHTML = `
-                    <div class="text-xs text-slate-500 font-mono flex justify-between">
-                        <span>${isMe ? 'YOU' : 'Rider: ' + uid.substring(0,6)}</span>
-                        <span class="text-green-400">${(data.distance || 0).toFixed(2)} km</span>
+                    <div class="flex justify-between items-end mb-2 border-b border-slate-700/50 pb-2">
+                        <span class="text-xs text-slate-500 font-mono mb-1">${isMe ? 'YOU' : 'Rider: ' + uid.substring(0,6)}</span>
+                        <div class="flex gap-4 items-baseline">
+                            <span class="text-xl font-bold font-mono text-slate-200 tracking-wider">${formatTime(data.time)}</span>
+                            <span class="text-2xl font-black font-mono text-green-400 tracking-tight">${(data.distance || 0).toFixed(2)}<span class="text-xs font-normal text-green-500/70 ml-1 uppercase">km</span></span>
+                        </div>
                     </div>
                     <div class="grid grid-cols-3 gap-2 text-center items-end">
                         <div>
@@ -435,7 +591,78 @@
         const canvas = document.getElementById('editorCanvas');
         const ctx = canvas.getContext('2d');
         let isDraggingPoint = -1;
+        let hoveredErgSegment = -1;
         const MAX_ELEV = 500; // max Y axis in meters
+
+        function updateUIForMode() {
+            const mode = trackData.mode;
+            uiMode.value = mode;
+            if (mode === 'resistance') {
+                uiPanelRes.classList.remove('hidden'); 
+                uiPanelErg.classList.add('hidden');
+                document.getElementById('trackLengthInput').classList.remove('hidden');
+                document.getElementById('ergDurationControls').classList.add('hidden');
+                document.getElementById('editorLabel').textContent = "Length (km):";
+            } else {
+                uiPanelRes.classList.add('hidden'); 
+                uiPanelErg.classList.remove('hidden');
+                document.getElementById('trackLengthInput').classList.add('hidden');
+                document.getElementById('ergDurationControls').classList.remove('hidden');
+                document.getElementById('editorLabel').textContent = "";
+            }
+
+            uiMode.disabled = !isHost;
+            document.getElementById('trackLengthInput').disabled = !isHost || (mode === 'resistance' && trackData.isGpxLoaded);
+            document.getElementById('ergButtonsGroup').style.display = isHost ? 'flex' : 'none';
+            
+            const gpxInput = document.getElementById('gpxFileInput');
+            if(gpxInput) gpxInput.disabled = !isHost;
+
+            const helperText = document.getElementById('editorHelperText');
+            if (mode === 'resistance' && trackData.isGpxLoaded) {
+                canvas.style.cursor = 'not-allowed';
+                if(helperText) helperText.textContent = "GPX track loaded. Manual editing is disabled.";
+            } else {
+                canvas.style.cursor = isHost ? 'crosshair' : 'default';
+                if(helperText) helperText.textContent = "Drag nodes vertically to adjust elevation. Synced to all riders.";
+            }
+        }
+
+        function renderErgInputs() {
+            const container = document.getElementById('ergDurationInputs');
+            container.innerHTML = '';
+            trackData.ergSegments.forEach((seg, i) => {
+                const input = document.createElement('input');
+                input.type = 'number';
+                input.min = '0.5';
+                input.step = '0.5';
+                input.className = 'w-14 bg-slate-900 border border-slate-600 rounded p-1 text-xs text-center text-white shrink-0';
+                input.value = seg.durationMin;
+                input.disabled = !isHost;
+                input.onchange = (e) => {
+                    seg.durationMin = Math.max(0.1, parseFloat(e.target.value) || 1);
+                    drawEditor();
+                    syncLocalData();
+                };
+                container.appendChild(input);
+            });
+        }
+
+        document.getElementById('btnAddErg').onclick = () => {
+            if(!isHost) return;
+            trackData.ergSegments.push({ powerPct: 50, durationMin: 5 });
+            renderErgInputs();
+            drawEditor();
+            syncLocalData();
+        };
+
+        document.getElementById('btnRemoveErg').onclick = () => {
+            if(!isHost || trackData.ergSegments.length <= 1) return;
+            trackData.ergSegments.pop();
+            renderErgInputs();
+            drawEditor();
+            syncLocalData();
+        };
 
         function resizeEditor() {
             const rect = canvas.parentElement.getBoundingClientRect();
@@ -463,27 +690,88 @@
             }
             ctx.stroke();
 
-            // Track Line
-            ctx.beginPath();
-            ctx.strokeStyle = '#22c55e'; // green-500
-            ctx.lineWidth = 3;
-            trackData.points.forEach((p, i) => {
-                let px = p.x * canvas.width;
-                let py = canvas.height - (p.y / MAX_ELEV) * canvas.height;
-                if(i===0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-            });
-            ctx.stroke();
+            if (trackData.mode === 'erg') {
+                // ERG Mode: Dynamic Bar Graphs based on duration
+                let totalDuration = trackData.ergSegments.reduce((sum, seg) => sum + seg.durationMin, 0) || 1;
+                let totalSeconds = totalDuration * 60;
+                let currentX = 0;
+                let accumSeconds = 0;
+                let maxH = canvas.height - 10; // Leave space at bottom for progress bar
+                
+                trackData.ergSegments.forEach((seg, i) => {
+                    let barW = (seg.durationMin / totalDuration) * canvas.width;
+                    let barH = (seg.powerPct / 100) * maxH;
+                    
+                    let segStartSec = accumSeconds;
+                    let segEndSec = accumSeconds + (seg.durationMin * 60);
+                    
+                    let isCompleted = localMetrics.time >= segEndSec;
+                    let isActive = localMetrics.time >= segStartSec && localMetrics.time < segEndSec;
+                    
+                    // Highlight if hovered or being dragged
+                    let isHovered = (i === hoveredErgSegment || isDraggingPoint === i);
+                    
+                    if (isCompleted) {
+                        ctx.fillStyle = '#475569'; // Slate grey for completed intervals
+                    } else {
+                        ctx.fillStyle = isHovered ? `hsl(${120 - seg.powerPct}, 80%, 60%)` : `hsl(${120 - seg.powerPct}, 70%, 50%)`; 
+                    }
+                    
+                    ctx.fillRect(currentX, maxH - barH, barW, barH);
+                    
+                    if (isActive) {
+                        ctx.strokeStyle = '#ffffff';
+                        ctx.lineWidth = 3;
+                    } else {
+                        ctx.strokeStyle = '#0f172a';
+                        ctx.lineWidth = 2;
+                    }
+                    ctx.strokeRect(currentX, maxH - barH, barW, barH);
+                    
+                    // Display height value on hover
+                    if (isHovered) {
+                        ctx.fillStyle = '#ffffff';
+                        ctx.font = 'bold 12px Inter, sans-serif';
+                        ctx.textAlign = 'center';
+                        // Keep text within canvas bounds
+                        let textY = Math.max(16, maxH - barH - 6);
+                        ctx.fillText(`${seg.powerPct}%`, currentX + barW / 2, textY);
+                    }
+                    
+                    accumSeconds = segEndSec;
+                    currentX += barW;
+                });
 
-            // Points
-            ctx.fillStyle = '#3b82f6'; // blue-500
-            trackData.points.forEach((p) => {
-                let px = p.x * canvas.width;
-                let py = canvas.height - (p.y / MAX_ELEV) * canvas.height;
+                // Draw Progress Bar under the graph
+                let progress = Math.min(1, localMetrics.time / totalSeconds);
+                ctx.fillStyle = '#1e293b';
+                ctx.fillRect(0, canvas.height - 6, canvas.width, 6);
+                ctx.fillStyle = '#3b82f6'; // Blue progress fill
+                ctx.fillRect(0, canvas.height - 6, progress * canvas.width, 6);
+                
+            } else {
+                // Resistance Mode: Spline
                 ctx.beginPath();
-                ctx.arc(px, py, 6, 0, Math.PI*2);
-                ctx.fill();
+                ctx.strokeStyle = '#22c55e'; // green-500
+                ctx.lineWidth = 3;
+                trackData.points.forEach((p, i) => {
+                    let px = p.x * canvas.width;
+                    let py = canvas.height - (p.y / MAX_ELEV) * canvas.height;
+                    if(i===0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+                });
                 ctx.stroke();
-            });
+
+                // Points
+                ctx.fillStyle = '#3b82f6'; // blue-500
+                trackData.points.forEach((p) => {
+                    let px = p.x * canvas.width;
+                    let py = canvas.height - (p.y / MAX_ELEV) * canvas.height;
+                    ctx.beginPath();
+                    ctx.arc(px, py, 6, 0, Math.PI*2);
+                    ctx.fill();
+                    ctx.stroke();
+                });
+            }
         }
 
         function getMousePos(evt) {
@@ -495,26 +783,78 @@
 
         function handlePointerDown(e) {
             if (!isHost) return; // Only host edits
+            if (trackData.mode === 'resistance' && trackData.isGpxLoaded) return;
+            
             const pos = getMousePos(e);
-            // Find closest point
-            for(let i=0; i<trackData.points.length; i++) {
-                let p = trackData.points[i];
-                let px = p.x * canvas.width;
-                let py = canvas.height - (p.y / MAX_ELEV) * canvas.height;
-                if(Math.hypot(px - pos.x, py - pos.y) < 15) {
-                    isDraggingPoint = i;
-                    break;
+            
+            if (trackData.mode === 'erg') {
+                let totalDuration = trackData.ergSegments.reduce((sum, seg) => sum + seg.durationMin, 0) || 1;
+                let currentX = 0;
+                isDraggingPoint = -1;
+                for (let i = 0; i < trackData.ergSegments.length; i++) {
+                    let barW = (trackData.ergSegments[i].durationMin / totalDuration) * canvas.width;
+                    if (pos.x >= currentX && pos.x <= currentX + barW) {
+                        isDraggingPoint = i;
+                        updateErgBar(pos.y);
+                        break;
+                    }
+                    currentX += barW;
+                }
+            } else {
+                // Find closest point
+                for(let i=0; i<trackData.points.length; i++) {
+                    let p = trackData.points[i];
+                    let px = p.x * canvas.width;
+                    let py = canvas.height - (p.y / MAX_ELEV) * canvas.height;
+                    if(Math.hypot(px - pos.x, py - pos.y) < 15) {
+                        isDraggingPoint = i;
+                        break;
+                    }
                 }
             }
         }
 
-        function handlePointerMove(e) {
-            if(isDraggingPoint === -1 || !isHost) return;
-            const pos = getMousePos(e);
-            let newY = (canvas.height - pos.y) / canvas.height * MAX_ELEV;
-            trackData.points[isDraggingPoint].y = Math.max(0, Math.min(MAX_ELEV, newY));
+        function updateErgBar(mouseY) {
+            let maxH = canvas.height - 10;
+            let newY = (maxH - mouseY) / maxH * 100;
+            trackData.ergSegments[isDraggingPoint].powerPct = Math.max(0, Math.min(100, Math.round(newY)));
             drawEditor();
-            rebuild3DTrack(); // live preview in 3D
+        }
+
+        function handlePointerMove(e) {
+            const pos = getMousePos(e);
+            
+            if (trackData.mode === 'erg') {
+                // Track hover state for ERG bars
+                let totalDuration = trackData.ergSegments.reduce((sum, seg) => sum + seg.durationMin, 0) || 1;
+                let currentX = 0;
+                let foundHover = -1;
+                
+                for (let i = 0; i < trackData.ergSegments.length; i++) {
+                    let barW = (trackData.ergSegments[i].durationMin / totalDuration) * canvas.width;
+                    if (pos.x >= currentX && pos.x <= currentX + barW) {
+                        foundHover = i;
+                        break;
+                    }
+                    currentX += barW;
+                }
+                
+                // Only redraw if the hovered segment changes
+                if (hoveredErgSegment !== foundHover) {
+                    hoveredErgSegment = foundHover;
+                    if (isDraggingPoint === -1) drawEditor();
+                }
+
+                if (isDraggingPoint !== -1 && isHost) {
+                    updateErgBar(pos.y);
+                }
+            } else {
+                if(isDraggingPoint === -1 || !isHost) return;
+                let newY = (canvas.height - pos.y) / canvas.height * MAX_ELEV;
+                trackData.points[isDraggingPoint].y = Math.max(0, Math.min(MAX_ELEV, newY));
+                drawEditor();
+                rebuild3DTrack(); // live preview in 3D
+            }
         }
 
         function handlePointerUp() {
@@ -533,6 +873,12 @@
         canvas.addEventListener('touchmove', handlePointerMove, {passive: true});
         window.addEventListener('touchend', handlePointerUp);
 
+        // Clear hover state when mouse leaves canvas
+        canvas.addEventListener('mouseleave', () => {
+            hoveredErgSegment = -1;
+            if (isDraggingPoint === -1) drawEditor();
+        });
+
         document.getElementById('trackLengthInput').addEventListener('change', (e) => {
             if(!isHost) { e.target.value = trackData.lengthKm; return; }
             trackData.lengthKm = Math.max(1, Math.min(100, parseFloat(e.target.value) || 10));
@@ -540,8 +886,178 @@
             syncLocalData();
         });
 
-        function initEditor() { resizeEditor(); }
+        function initEditor() { 
+            resizeEditor(); 
+            updateUIForMode();
+            renderErgInputs();
+        }
 
+        // --- GPX Support ---
+        function haversineDistance(coords1, coords2) {
+            const toRad = x => (x * Math.PI) / 180;
+            const R = 6371; // km
+            const dLat = toRad(coords2.lat - coords1.lat);
+            const dLon = toRad(coords2.lon - coords1.lon);
+            const lat1 = toRad(coords1.lat);
+            const lat2 = toRad(coords2.lat);
+
+            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                      Math.sin(dLon / 2) * Math.sin(dLon / 2) * Math.cos(lat1) * Math.cos(lat2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return R * c;
+        }
+
+        document.getElementById('gpxFileInput').addEventListener('change', (e) => {
+            if (!isHost) return;
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const gpxText = event.target.result;
+                const parser = new DOMParser();
+                const xmlDoc = parser.parseFromString(gpxText, "text/xml");
+                
+                // Fallback to route points if track points don't exist
+                let trkpts = xmlDoc.getElementsByTagName("trkpt");
+                if (trkpts.length === 0) {
+                    trkpts = xmlDoc.getElementsByTagName("rtept");
+                }
+                
+                if (trkpts.length === 0) {
+                    console.error("No track points found in GPX file.");
+                    return;
+                }
+
+                let totalDist = 0;
+                let parsedPoints = [];
+                let lastPoint = null;
+                
+                let hasTimes = true;
+                let baseTime = 0;
+                gpxTimestamps = [];
+
+                for (let i = 0; i < trkpts.length; i++) {
+                    let pt = trkpts[i];
+                    let lat = parseFloat(pt.getAttribute("lat"));
+                    let lon = parseFloat(pt.getAttribute("lon"));
+                    let eleElement = pt.getElementsByTagName("ele")[0];
+                    let ele = eleElement ? parseFloat(eleElement.textContent) : 0;
+                    
+                    let currentPoint = { lat, lon, ele };
+                    
+                    if (lastPoint) {
+                        totalDist += haversineDistance(lastPoint, currentPoint);
+                    }
+                    
+                    let timeElement = pt.getElementsByTagName("time")[0];
+                    if (timeElement && timeElement.textContent) {
+                        let timeMs = new Date(timeElement.textContent).getTime();
+                        if (!isNaN(timeMs)) {
+                            if (i === 0 || baseTime === 0) baseTime = timeMs;
+                            if (hasTimes) gpxTimestamps.push({ dist: totalDist, timeSec: (timeMs - baseTime) / 1000 });
+                        } else {
+                            hasTimes = false;
+                        }
+                    } else {
+                        hasTimes = false;
+                    }
+                    
+                    parsedPoints.push({ dist: totalDist, ele: ele, lat: lat, lon: lon });
+                    lastPoint = currentPoint;
+                }
+
+                if (totalDist < 0.1) totalDist = 0.1;
+
+                // Downsample to max 50 points for the editor/3D performance
+                const targetPoints = 50;
+                let downsampled = [];
+                if (parsedPoints.length > targetPoints) {
+                    let step = parsedPoints.length / targetPoints;
+                    for (let i = 0; i < targetPoints; i++) {
+                        let index = Math.floor(i * step);
+                        downsampled.push(parsedPoints[index]);
+                    }
+                    downsampled.push(parsedPoints[parsedPoints.length - 1]);
+                } else {
+                    downsampled = parsedPoints;
+                }
+
+                // Normalize Elevation to strictly fit the 0-MAX_ELEV visual range
+                let minEle = Math.min(...downsampled.map(p => p.ele));
+                let maxEle = Math.max(...downsampled.map(p => p.ele));
+                let eleRange = maxEle - minEle;
+                
+                // Prevent flat routes from causing divide-by-zero or looking like cliffs
+                if (eleRange < 10) eleRange = 10; 
+
+                let lat0 = downsampled[0].lat;
+                let lon0 = downsampled[0].lon;
+                let R = 6371; // Earth radius in km
+
+                let mapXs = [];
+                let mapZs = [];
+
+                let newPoints = downsampled.map(p => {
+                    // Convert GPS coordinates to local X/Z distances in km (Equirectangular projection)
+                    let x_km = R * (p.lon - lon0) * (Math.PI / 180) * Math.cos(lat0 * Math.PI / 180);
+                    let z_km = R * (p.lat - lat0) * (Math.PI / 180);
+                    
+                    mapXs.push(x_km);
+                    mapZs.push(z_km);
+
+                    return {
+                        x: p.dist / totalDist,
+                        // Scale to fit comfortably between 20 and 400 (MAX_ELEV is 500)
+                        y: 20 + ((p.ele - minEle) / eleRange) * 380,
+                        mapX: x_km,
+                        mapZ: z_km
+                    };
+                });
+
+                newPoints[0].x = 0;
+                newPoints[newPoints.length - 1].x = 1;
+
+                trackData.lengthKm = parseFloat(totalDist.toFixed(2));
+                document.getElementById('trackLengthInput').value = trackData.lengthKm;
+                trackData.points = newPoints;
+                trackData.gpxBounds = {
+                    minX: Math.min(...mapXs), maxX: Math.max(...mapXs),
+                    minZ: Math.min(...mapZs), maxZ: Math.max(...mapZs)
+                };
+                trackData.isGpxLoaded = true;
+                
+                if (hasTimes && gpxTimestamps.length > 0) {
+                    document.getElementById('ghostRiderContainer').classList.remove('hidden');
+                } else {
+                    document.getElementById('ghostRiderContainer').classList.add('hidden');
+                    isGhostEnabled = false;
+                    document.getElementById('toggleGhost').checked = false;
+                }
+                
+                drawEditor();
+                updateUIForMode();
+                rebuild3DTrack();
+                syncLocalData();
+                
+                e.target.value = ""; // Reset input
+            };
+            reader.readAsText(file);
+        });
+
+        document.getElementById('toggleGhost').addEventListener('change', (e) => {
+            isGhostEnabled = e.target.checked;
+            if(!isGhostEnabled) {
+                delete activeUsers['GHOST'];
+                if(avatars3D['GHOST']) {
+                    scene.remove(avatars3D['GHOST']);
+                    delete avatars3D['GHOST'];
+                }
+                renderGrid();
+                drawMinimap();
+                drawTopDownMinimap();
+            }
+        });
 
         // --- Three.js 3D Environment ---
         let scene, camera, renderer, trackMesh;
@@ -592,9 +1108,17 @@
             const pts3d = trackData.points.map(p => {
                 // X in 2D = distance along Z in 3D. 
                 // Y in 2D = elevation (Y) in 3D.
+                let x = 0;
                 let z = -p.x * trackData.lengthKm * TRACK_SCALE; 
-                let y = p.y; 
-                return new THREE.Vector3(0, y, z);
+                
+                // If GPX data is present, apply real-world turns
+                if (trackData.isGpxLoaded && p.mapX !== undefined && p.mapZ !== undefined) {
+                    x = p.mapX * TRACK_SCALE;
+                    z = -p.mapZ * TRACK_SCALE; // Negate Z as North is typically -Z in WebGL
+                }
+                
+                let y = trackData.mode === 'erg' ? 0 : p.y; 
+                return new THREE.Vector3(x, y, z);
             });
 
             const curve = new THREE.CatmullRomCurve3(pts3d, false, 'catmullrom', 0.5);
@@ -621,7 +1145,9 @@
             let mesh = avatars3D[uid];
             if(!mesh) {
                 const geo = new THREE.SphereGeometry(3, 16, 16);
-                const mat = new THREE.MeshLambertMaterial({ color: isLocal ? 0x22c55e : strToColor(uid) });
+                let color = isLocal ? 0x22c55e : strToColor(uid);
+                if (uid === 'GHOST') color = 0xa855f7; // purple-500
+                const mat = new THREE.MeshLambertMaterial({ color: color });
                 mesh = new THREE.Mesh(geo, mat);
                 scene.add(mesh);
                 avatars3D[uid] = mesh;
@@ -637,16 +1163,96 @@
             mesh.position.y += 3; // Float above track
 
             if(isLocal) {
-                // Camera follows local avatar
-                const cameraOffset = new THREE.Vector3(0, 15, 40); // Behind and up
-                camera.position.copy(point).add(cameraOffset);
-                camera.lookAt(point.clone().add(new THREE.Vector3(0,0,-50)));
+                // Camera follows local avatar, looking along the curve's tangent to steer around corners
+                const backDir = tangent.clone().negate().multiplyScalar(40); // 40 units behind
+                const camPos = point.clone().add(backDir);
+                camPos.y += 15; // 15 units up
+                
+                camera.position.copy(camPos);
+                
+                const lookPos = point.clone().add(tangent.clone().multiplyScalar(50)); // Look 50 units ahead
+                camera.lookAt(lookPos);
             }
         }
 
         // --- Minimap Overlay ---
         const minimapCanvas = document.getElementById('minimapCanvas');
         const minimapCtx = minimapCanvas.getContext('2d');
+        
+        const topdownCanvas = document.getElementById('topdownCanvas');
+        const topdownCtx = topdownCanvas.getContext('2d');
+
+        function drawTopDownMinimap() {
+            if (!topdownCtx) return;
+            
+            if (!trackData.isGpxLoaded || !trackData.gpxBounds) {
+                topdownCanvas.classList.add('hidden-view');
+                return;
+            }
+            
+            topdownCanvas.classList.remove('hidden-view');
+            const width = topdownCanvas.width;
+            const height = topdownCanvas.height;
+            topdownCtx.clearRect(0, 0, width, height);
+
+            let b = trackData.gpxBounds;
+            let MathMax = Math.max;
+            let rangeX = b.maxX - b.minX;
+            let rangeZ = b.maxZ - b.minZ;
+            let maxRange = MathMax(rangeX, rangeZ) || 1;
+            
+            // 80% scale to leave padding
+            let scale = (width * 0.8) / maxRange; 
+            let offsetX = (width - rangeX * scale) / 2;
+            let offsetZ = (height - rangeZ * scale) / 2;
+
+            // Draw Track
+            topdownCtx.beginPath();
+            topdownCtx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+            topdownCtx.lineWidth = 3;
+            
+            trackData.points.forEach((p, i) => {
+                let cx = (p.mapX - b.minX) * scale + offsetX;
+                let cz = height - ((p.mapZ - b.minZ) * scale + offsetZ); // Invert Z so North is Up
+                if (i === 0) topdownCtx.moveTo(cx, cz); else topdownCtx.lineTo(cx, cz);
+            });
+            topdownCtx.stroke();
+
+            // Draw Avatars
+            Object.entries(activeUsers).forEach(([uid, data]) => {
+                const isMe = uid === currentUserId;
+                let distFraction = MathMax(0, Math.min(1, (data.distance || 0) / trackData.lengthKm));
+                
+                let p1 = trackData.points[0], p2 = trackData.points[0];
+                for(let i=0; i<trackData.points.length - 1; i++) {
+                    if (distFraction >= trackData.points[i].x && distFraction <= trackData.points[i+1].x) {
+                        p1 = trackData.points[i];
+                        p2 = trackData.points[i+1];
+                        break;
+                    }
+                }
+                
+                let rangeDist = p2.x - p1.x;
+                let localFrac = rangeDist === 0 ? 0 : (distFraction - p1.x) / rangeDist;
+                
+                let interpX = p1.mapX + (p2.mapX - p1.mapX) * localFrac;
+                let interpZ = p1.mapZ + (p2.mapZ - p1.mapZ) * localFrac;
+                
+                let cx = (interpX - b.minX) * scale + offsetX;
+                let cz = height - ((interpZ - b.minZ) * scale + offsetZ);
+
+                topdownCtx.beginPath();
+                topdownCtx.arc(cx, cz, isMe ? 5 : 4, 0, Math.PI*2);
+                topdownCtx.fillStyle = isMe ? '#22c55e' : strToColor(uid);
+                topdownCtx.fill();
+                
+                if (isMe) {
+                    topdownCtx.strokeStyle = '#ffffff';
+                    topdownCtx.lineWidth = 1.5;
+                    topdownCtx.stroke();
+                }
+            });
+        }
 
         function drawMinimap() {
             if(!minimapCtx) return;
@@ -660,7 +1266,7 @@
             minimapCtx.lineWidth = 3;
             trackData.points.forEach((p, i) => {
                 let px = p.x * width;
-                let py = height - (p.y / MAX_ELEV) * height;
+                let py = height - ((trackData.mode === 'erg' ? 0 : p.y) / MAX_ELEV) * height;
                 if(i===0) minimapCtx.moveTo(px, py); else minimapCtx.lineTo(px, py);
             });
             minimapCtx.stroke();
@@ -683,6 +1289,8 @@
                 let rangeX = p2.x - p1.x;
                 let localFrac = rangeX === 0 ? 0 : (distFraction - p1.x) / rangeX;
                 let interpY = p1.y + (p2.y - p1.y) * localFrac;
+                
+                if (trackData.mode === 'erg') interpY = 0;
 
                 let px = distFraction * width;
                 let py = height - (interpY / MAX_ELEV) * height;
@@ -714,11 +1322,12 @@
         const uiMaxPower = document.getElementById('ctrlMaxPower');
         
         uiMode.onchange = (e) => {
-            if(e.target.value === 'resistance') {
-                uiPanelRes.classList.remove('hidden'); uiPanelErg.classList.add('hidden');
-            } else {
-                uiPanelRes.classList.add('hidden'); uiPanelErg.classList.remove('hidden');
-            }
+            if(!isHost) return;
+            trackData.mode = e.target.value;
+            updateUIForMode();
+            drawEditor();
+            rebuild3DTrack();
+            syncLocalData();
         };
 
         document.getElementById('ctrlDifficulty').oninput = (e) => document.getElementById('diffVal').textContent = e.target.value;
@@ -735,6 +1344,8 @@
                 btDevice.addEventListener('gattserverdisconnected', () => {
                     document.getElementById('statusText').textContent = "Disconnected";
                     document.getElementById('statusDot').className = 'w-2.5 h-2.5 rounded-full bg-slate-500';
+                    document.getElementById('btnConnectTrainer').classList.remove('hidden');
+                    document.getElementById('btnDisconnectTrainer').classList.add('hidden');
                     ftmsControlChar = null;
                 });
 
@@ -757,9 +1368,17 @@
 
                 document.getElementById('statusText').textContent = "Connected";
                 document.getElementById('statusDot').className = 'w-2.5 h-2.5 rounded-full bg-green-500 glow-green';
+                document.getElementById('btnConnectTrainer').classList.add('hidden');
+                document.getElementById('btnDisconnectTrainer').classList.remove('hidden');
             } catch(e) {
                 console.error(e);
                 document.getElementById('statusText').textContent = "Failed";
+            }
+        };
+
+        document.getElementById('btnDisconnectTrainer').onclick = () => {
+            if(btDevice?.gatt.connected) {
+                btDevice.gatt.disconnect();
             }
         };
 
@@ -803,7 +1422,7 @@
 
             pendingCommand = true;
             try {
-                if(uiMode.value === 'resistance') {
+                if(trackData.mode === 'resistance') {
                     // Map gradient to 0-100 resistance level
                     // Say 15% gradient = 100 resistance at 100% difficulty
                     let difficulty = parseInt(uiDiff.value) / 100;
@@ -813,10 +1432,22 @@
                     // OpCode 0x04 Set Target Resistance Level
                     await ftmsControlChar.writeValue(new Uint8Array([0x04, targetRes]));
                 } else {
-                    // ERG Mode
+                    // ERG Mode based on Bar Graph
                     let maxP = parseInt(uiMaxPower.value);
-                    let targetPower = Math.max(0, maxP * (localMetrics.gradient / 15));
-                    targetPower = Math.min(maxP, Math.round(targetPower));
+                    
+                    let elapsed = localMetrics.time;
+                    
+                    let currentPowerPct = 0;
+                    let accum = 0;
+                    for (let seg of trackData.ergSegments) {
+                        accum += seg.durationMin * 60;
+                        if (elapsed <= accum) {
+                            currentPowerPct = seg.powerPct;
+                            break;
+                        }
+                    }
+                    
+                    let targetPower = Math.round(maxP * (currentPowerPct / 100));
                     
                     // OpCode 0x05 Set Target Power (SINT16)
                     const buffer = new ArrayBuffer(3);
@@ -841,8 +1472,13 @@
             let dt = time - lastPhysicsTime;
             lastPhysicsTime = time;
 
+            // Accumulate Time only when active
+            if (isRideActive) {
+                localMetrics.time += (dt / 1000);
+            }
+
             // Physics Integration: Speed (km/h) to Distance (km)
-            if(localMetrics.speed > 0) {
+            if(localMetrics.speed > 0 && isRideActive) {
                 let speedMps = localMetrics.speed / 3.6;
                 let distMeters = speedMps * (dt / 1000);
                 localMetrics.distance += (distMeters / 1000);
@@ -852,6 +1488,51 @@
                     localMetrics.distance = 0; 
                 }
             }
+            
+            // GPX Ghost Rider Logic
+            if (isGhostEnabled && isRideActive && gpxTimestamps.length > 0) {
+                let ghostTime = localMetrics.time;
+                let ghostDist = 0;
+                let ghostSpeed = 0;
+                
+                if (ghostTime >= gpxTimestamps[gpxTimestamps.length - 1].timeSec) {
+                    ghostDist = gpxTimestamps[gpxTimestamps.length - 1].dist;
+                } else {
+                    for (let i = 0; i < gpxTimestamps.length - 1; i++) {
+                        let p1 = gpxTimestamps[i];
+                        let p2 = gpxTimestamps[i+1];
+                        if (ghostTime >= p1.timeSec && ghostTime < p2.timeSec) {
+                            let frac = (p2.timeSec - p1.timeSec) > 0 ? (ghostTime - p1.timeSec) / (p2.timeSec - p1.timeSec) : 0;
+                            ghostDist = p1.dist + (p2.dist - p1.dist) * frac;
+                            ghostSpeed = (p2.timeSec - p1.timeSec) > 0 ? ((p2.dist - p1.dist) / (p2.timeSec - p1.timeSec)) * 3600 : 0;
+                            break;
+                        }
+                    }
+                }
+                
+                // Keep ghost looped if track loops
+                ghostDist = ghostDist % trackData.lengthKm;
+                
+                activeUsers['GHOST'] = {
+                    distance: ghostDist,
+                    time: ghostTime,
+                    speed: ghostSpeed,
+                    power: 0,
+                    cadence: 0
+                };
+            }
+
+            // Record session data every 1 second (1000ms)
+            if (isRideActive && (time - lastRecordTime >= 1000)) {
+                recordedData.push({
+                    timestamp: new Date(),
+                    distance: localMetrics.distance,
+                    speed: localMetrics.speed,
+                    power: localMetrics.power,
+                    cadence: localMetrics.cadence
+                });
+                lastRecordTime = time;
+            }
 
             // Sync metrics to UI/3D immediately for local player
             if(activeUsers[currentUserId]) {
@@ -859,6 +1540,7 @@
                 activeUsers[currentUserId].speed = localMetrics.speed;
                 activeUsers[currentUserId].power = localMetrics.power;
                 activeUsers[currentUserId].cadence = localMetrics.cadence;
+                activeUsers[currentUserId].time = localMetrics.time;
             }
 
             // Dead reckoning for remote users & Avatar updates
@@ -870,6 +1552,7 @@
                     let speedMps = user.speed / 3.6;
                     let distMeters = speedMps * (dt / 1000);
                     user.distance = (user.distance || 0) + (distMeters / 1000);
+                    user.time = (user.time || 0) + (dt / 1000);
                     
                     if(user.distance > trackData.lengthKm) {
                         user.distance = 0;
@@ -883,10 +1566,12 @@
             // Update UI Grid (Throttled to 200ms to avoid DOM thrashing, feels instant)
             if (time - lastUIRenderTime > 200) {
                 renderGrid(); 
+                if (trackData.mode === 'erg') drawEditor(); // Continuously update progress bar
                 lastUIRenderTime = time;
             }
 
             drawMinimap(); // Render 2D Minimap
+            drawTopDownMinimap(); // Render 2D Top-down GPX Minimap
 
             // Render 3D
             if(renderer && scene && camera) {
